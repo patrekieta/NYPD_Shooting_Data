@@ -1,0 +1,175 @@
+---
+title: "NYPD Shooting Data"
+author: "Patrick Rekieta"
+date: "2023-06-19"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+## Setup:
+
+The data for this project can be found at <https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic/resource/c564b578-fd8a-4005-8365-34150d306cc4> where we can use the included link to download a csv directly into R. Once the data is loaded in, we can begin cleaning and visualization.
+
+```{r setup}
+suppressPackageStartupMessages({
+  require(tidyverse, quietly = T)
+require(lubridate, quietly = T)
+require(gridExtra, quietly = T)
+  require(grid)
+})
+raw_data <- read.csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+
+
+```
+
+## Cleaning the data:
+
+First we can examine the data and determine which columns are useful to our analysis.
+
+```{r}
+summary.data.frame(raw_data)
+```
+
+After some review, I have decided that there are columns that will not be necessary for this analysis. Some of those columns are Lon_Lat, X_COORD_CD, Y_COORD_CD, LOC_OF_OCCUR_DESC, and INCIDENT_KEY. To remove these we can easily use the subset() function to subset our data by removing columns.
+
+```{r}
+
+full_data <- subset(raw_data, select = -c(Lon_Lat, X_COORD_CD, Y_COORD_CD, LOC_OF_OCCUR_DESC, INCIDENT_KEY))
+```
+
+Next we want to start cleaning our data by making sure each column is a class that is useful to our analysis. To start we will convert the column OCCUR_DATE to be a Date type. Next we want to make sure our character columns are NA rather than an empty string. Additionally, I noticed that some columns that are supposed to have empty values are instead marked with "(null)". We will convert any "(null)" that we find to be true NAs. Lastly, I don't believe the seconds portion of OCCUR_TIME to be useful for visualization so I will remove the seconds and leave the column as "hour:minute".
+
+```{r}
+#Convert column to date
+full_data$OCCUR_DATE <- as.Date(full_data$OCCUR_DATE, format = "%m/%d/%Y")
+
+# replace any occurance of :00 to be empty string
+full_data$OCCUR_TIME <- substr(full_data$OCCUR_TIME,1,5)
+full_data[full_data==""] <- NA
+
+full_data$PERP_AGE_GROUP <- gsub("(null)",NA,full_data$PERP_AGE_GROUP)
+full_data$PERP_RACE <- gsub("(null)",NA,full_data$PERP_RACE)
+full_data$PERP_SEX <- gsub("(null)",NA,full_data$PERP_SEX)
+full_data$VIC_AGE_GROUP <- gsub("(null)",NA,full_data$VIC_AGE_GROUP)
+full_data$VIC_RACE <- gsub("(null)",NA,full_data$VIC_RACE)
+full_data$VIC_SEX <- gsub("(null)",NA,full_data$VIC_SEX)
+
+
+```
+
+## Visualizing the data:
+
+Now that our data has been cleaned, we can begin examining what information exists in our data. As we prepare our visualizations, there will be additional cleaning that must take place. I will create three different charts to help examine what information might be useful to explore further in our analysis.
+
+Our first chart will be a simple count of incidents by their time of day. To make it more legible, I have broken down the occurrence times to fit into a 24 hour period. While we could look at a line chart for every minute of the day, it is easier to fit each incident within an hour. We are still able to visualize some trends within our data from this expanded point of view.
+
+```{r}
+full_data$hour_of_day <- substr(full_data$OCCUR_TIME,1,2)
+time_chart <- as.data.frame(table(full_data$hour_of_day))
+chart1 <- ggplot(data = full_data)+
+  geom_bar(aes(x=hour_of_day),fill = "blue") +
+  xlab("Hour of Day")+
+  ylab("Count")+
+  ggtitle("Chart 1")+
+  theme(plot.title = element_text(hjust = 0.5))
+chart1
+
+```
+
+From the data we begin to see some expected trends. Based on Chart 1 we see an expected pattern of incidence. After sunrise, the count of incidences continues to increase throughout the day until it reaches a peak count around midnight. The majority of incidences occurs during night time with a sharp decline right before sunrise.
+
+In Chart 2, we will examine the amount of incidences per borough. There is no additional cleaning that needs to take place with this data. we can simply create a bar chart with counts per borough.
+
+```{r}
+chart2 <- ggplot(data = full_data)+
+  geom_bar(aes(x = BORO, y = after_stat(count))) +
+  xlab("NYC Borough")+
+  ylab("Count")+
+  ggtitle("Chart 2")+
+  theme(plot.title = element_text(hjust = 0.5))
+chart2
+```
+
+With our counts, it's clear that over the multi-year period of this dataset, the majority of incidences occur in the boroughs of Brooklyn and Bronx. This might be a good indicator of things to come but it does not tell us the full story. While this data could still be useful, it might help to produce some additional analysis with this specific data. We will explore this further in the analysis section.
+
+Lastly, Chart 3 shows of waterfall chart of victim and perpetrator counts by age group. This gives us a quick summary of the different age groups we are working with. Instead of counts, we could also show this data as percentage of the grand total but the overall affect would look similar. In order to create this chart we need to do some additional cleaning. Earlier we noticed there was some missing data in the dataset. When we handled this data earlier, we converted our missing values to be NA. This is useful when performing statistics or getting accurate counts but for our visualization, we need to make sure all our values are uniform. Thankfully, we do not need to change anything from NA as this would create a new age group in our graph. Instead, there are some values that do not properly fit into any category. We can start by cleaning these values and converting them to NA. They will no longer be considered for the count. To create a waterfall chart in R, we can use the GridExtra package to combine charts into one final output. The data in red indicates the counts of our perpetrators and the data in blue indicates the counts of our victims.
+
+```{r}
+full_data$perp_age <- ifelse(full_data$PERP_AGE_GROUP=="<18" | full_data$PERP_AGE_GROUP=="18-24" | full_data$PERP_AGE_GROUP=="25-44" | full_data$PERP_AGE_GROUP=="45-64" | full_data$PERP_AGE_GROUP=="65+", yes = full_data$PERP_AGE_GROUP, no = NA)
+full_data$vic_age <- ifelse(full_data$VIC_AGE_GROUP=="<18" | full_data$VIC_AGE_GROUP=="18-24" | full_data$VIC_AGE_GROUP=="25-44" | full_data$VIC_AGE_GROUP=="45-64" | full_data$VIC_AGE_GROUP=="65+", yes = full_data$VIC_AGE_GROUP, no = NA)
+
+
+chart3 <- ggplot()+
+  geom_bar(aes(x = full_data$perp_age[!is.na(full_data$perp_age)]), fill = "red")+ ylab("Perpetrator Count") + coord_flip() + scale_y_reverse(limits = c(12500,0)) + theme(axis.text.y = element_blank(), axis.title.y = element_blank(), axis.ticks.y = element_blank()) + xlab("Perp Count")
+
+chart4 <- ggplot()+  
+geom_bar(aes(x = full_data$vic_age[!is.na(full_data$vic_age)]), fill = "blue")+ ylab("Victim Count") + coord_flip() + theme(axis.title.y = element_blank(), axis.ticks.y = element_blank()) 
+
+grid.arrange(chart3, chart4 , ncol = 2, top = textGrob("Chart 3"))
+
+```
+
+After examining our output in Chart 3 we begin to notice a few things. The first thing I noticed is the perpetrators tend to skew younger while the victims tend to skew older. This might not be the full story as we can also notice that we really only have identification of the perpetrator in half the incidences. While we can still learn more from this data, the large missing sample of perpetrator data might lead to inaccuracies compared to our true population.
+
+## Analysis:
+
+Now that we have done some introductory analysis on our data, we can take what we learned in our previous visualizations and start producing some more advanced analysis. The data that was most interesting to me was the count of incidents per borough. The most obvious way to gain additional detail is to get an incidence rate for each borough. To do this we will take our counts by borough and divide that by the total population of the borough. Then we can multiply that number by 100K to produce an incidence rate per 100K for each borough. However, it is worth noting that the data we are using contains 16 years of incidents. We can adjust our data by dividing by the total number of years to get our average yearly incidence rate. This can be useful when comparing years or looking at trends for year over year.
+
+The population data for this analysis comes from the city of New York: <https://data.cityofnewyork.us/resource/xywu-7bv9.csv>
+
+After finding our rates we see that the Bronx actually has the largest incidence rate per year despite the fact that Brooklyn had more total incidents. So how we can take this further? Maybe we can look at what some underlying causes for the increased incidence rate of Bronx compared to the other boroughs. While there are many possibilities for what might be going on here, let's examine population density. It seems reasonable to assume that the more people there are in an area, the more likely an incident will occur. To do this we will need the size of each borough to calculate population density.
+
+Borough size data is manually extracted from the New York Metropolitan Transportation Council: [https://www.nymtc.org/portals/0/pdf/CPTHSP/NYMTC%20coord%20plan%20NYC%20CH03.pdf](https://www.nymtc.org/portals/0/pdf/CPT-HSP/NYMTC%20coord%20plan%20NYC%20CH03.pdf)
+
+After performing some additional cleaning of our new data, we can calculate density per borough by dividing our population by the sq miles of the borough. Now we can create a linear model of our data by looking at population density as a function of incidence rate. We can chart this linear model against our data in a scatter plot to see our trends.
+
+Let's take a look.
+
+```{r}
+nyc_pop <- read.csv("https://data.cityofnewyork.us/resource/xywu-7bv9.csv")
+
+nyc_pop <- nyc_pop[,c("borough","X_2010")]
+colnames(nyc_pop) <- c("BORO","Population")
+nyc_pop$BORO <- toupper(gsub(" ","",as.vector(nyc_pop$BORO)))
+nyc_pop$BORO[6] <- "STATEN ISLAND"
+
+
+count_boro <- as.data.frame(table(full_data$BORO))
+colnames(count_boro) <- c("BORO","Freq")
+
+year_duration <- max(year(full_data$OCCUR_DATE))-min(year(full_data$OCCUR_DATE))
+
+count_boro <- left_join(count_boro,nyc_pop, by = "BORO")
+count_boro$incident_rate <- ((count_boro$Freq/count_boro$Population)*100000) / year_duration
+
+## Taken from New york metropolitan transportation council https://www.nymtc.org/portals/0/pdf/CPT-HSP/NYMTC%20coord%20plan%20NYC%20CH03.pdf
+boro_size <- as.data.frame(matrix(data = NA, nrow = 5, ncol = 2))
+colnames(boro_size) <- c("BORO","Size (sq miles)")
+boro_size$BORO <- c("BRONX","BROOKLYN", "MANHATTAN","QUEENS","STATEN ISLAND")
+boro_size$`Size (sq miles)` <- c(42,71,23,109,59)
+
+count_boro <- left_join(count_boro, boro_size, by = "BORO")
+count_boro$pop_density <- count_boro$Population/count_boro$`Size (sq miles)`
+
+model1 <- lm(count_boro$pop_density ~ count_boro$incident_rate)
+
+count_boro$pred <- predict(model1)
+
+chart5 <- ggplot(data = count_boro) +
+  geom_point(aes(x = incident_rate, y = pop_density), color = "blue")+
+  geom_line(aes(x = incident_rate, y = pred), color = "red") +
+  geom_text(aes(x = incident_rate, y = pop_density, label = BORO), hjust = 0, vjust = 0)+
+  xlim(10,38)+
+  xlab("Incidence Rate per 100K") +
+  ylab("Population Density")+
+  ggtitle("Chart 5")+
+  theme(plot.title = element_text(hjust = 0.5))
+chart5
+```
+
+After analyzing the above chart, we can see that there is in fact a slight positive correlation between population density and incidence rate. However, with only 5 points of data, this correlation does seem very strong. We could improve our analysis by looking on a smaller scale such as census tracts or zipcodes. Additionally, we can notice that Manhattan has a very high population density but a relatively low incidence rate for shootings. This might indicate additional factors at play in why these incidence rates follow this pattern.
+
+More analysis could always be done but we will stop here with just a small sample of what can be done with a simple dataset such as this one. It is important to the inherent bias in our data and ourselves. These incidents are only reported when a police report is filed which means there is almost always a victim. This is not true for the perpetrator data which means our overall data might be incomplete or lacking in crucial information. It is also worth noting that I made the assumption that population density and gun violence could be related which is why we analyzed the data further. This assumption may not be correct and we should be reasonable that we do not have a granular enough scale to fully comprehend this correlation.
+
+Thank you for taking the time to read through this report. I greatly appreciate it and hope this gives you a better taste of the capabilities of data science and statistical analysis. s
